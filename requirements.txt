@@ -1,1 +1,18 @@
-streamlit
+# requirements.txt
+pandas==2.2.2
+streamlit==1.37.1
+seaborn==0.13.2
+matplotlib==3.9.2
+koreanize-matplotlib==0.1.1
+openai==1.76.2
+streamlit-aggrid==1.1.5.post1
+gspread==5.12.4
+google-auth==2.36.0
+pandas==2.2.2
+numpy==2.0.1
+streamlit==1.37.1
+seaborn==0.13.2
+matplotlib==3.9.2
+koreanize-matplotlib==0.1.1
+statsmodels==0.14.4
+stemgraphic
