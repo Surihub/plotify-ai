@@ -491,21 +491,22 @@ def plan_tab() -> None:
         st.success("계획이 저장되었습니다!")
 
 
-# ===== 20. 3. Data & Analysis TAB =====
-def data_analysis_tab() -> None:
-    """3단계: 시각화·통계요약·해석 + AI 피드백 (최소 re-run 구조)"""
-    st.subheader("📈 데이터 시각화 · 통계 요약 · 해석")
-    st.info("""
-    **3️⃣ 자료 분석 및 해석**  
-    선택한 변수들을 시각화하고 데이터를 분석해봅니다.  
-    그래프나 통계값을 통해 패턴을 찾아보고, 질문에 대한 답을 추론해보세요.  
-    필요하면 필터 기능을 사용해 특정 조건(예: 중학생만, 남학생만 등)에 맞는  
-    데이터를 선택해 분석할 수 있습니다.       
-                
-    - 기능 추가 예정(필터링, 통계량 구하기, 범주별로 묶어 보기, 통계적 추정하기 등등)
-    """)        
 
-    # ───────────────── 데이터 준비 ─────────────────
+from scipy.stats import t        # ← 신뢰구간 계산에 사용
+import numpy as np 
+
+def data_analysis_tab() -> None:
+    """3단계: 시각화·통계요약·해석 + AI 피드백 + 신뢰구간 추정"""
+    st.subheader("📈 데이터 시각화 · 통계 요약 · 해석")
+    st.info(
+        """
+        **3️⃣ 자료 분석 및 해석**  
+        선택한 변수들을 시각화하고 데이터를 분석해봅니다.  
+        그래프나 통계값을 통해 패턴을 찾아보고, 질문에 대한 답을 추론해보세요.
+        """
+    )
+
+    # ───────────── 데이터 준비 ─────────────
     var_list: list[str] = st.session_state.get("var_list", [])
     if not var_list:
         st.error("Plan 탭에서 분석 변수를 먼저 고르세요.")
@@ -513,57 +514,67 @@ def data_analysis_tab() -> None:
     df_sel = st.session_state.df[var_list]
 
     show_user_card(
-    "📌 나의 입력 요약",
-    {
-        "최종 질문":  st.session_state.get("final_q", "(미작성)"),
-        "나의 계획":  st.session_state.get("myplan",  "(미작성)")
-    }
-)
+        "📌 나의 입력 요약",
+        {
+            "최종 질문": st.session_state.get("final_q", "(미작성)"),
+            "나의 계획": st.session_state.get("myplan", "(미작성)"),
+        },
+    )
 
-    # ───────────────── 사이드바 메뉴 ────────────────
+    # ──────────── 분석 모드 선택 ────────────
     st.sidebar.header("🎛️ 분석 옵션")
     mode = st.sidebar.radio(
         "분석 모드",
-        ("① 전체 그래프", "② 단일 변수 분석", "③ 선택 그래프"),
+        (
+            "① 전체 그래프",
+            "② 단일 변수 분석",
+            "③ 선택 그래프",
+            "④ 신뢰구간 추정 🔹",
+        ),
         index=2,
         key="da_mode",
     )
 
-    # ───────────────── 캐싱용 헬퍼 ──────────────────
+    # ─────────── 공통: 선택 그래프 캐시 ───────────
     @st.cache_data(show_spinner="🎨 그래프 렌더링 중…")
     def _cached_choice_plot(df: pd.DataFrame, args: tuple, rot: int):
-        """var_x/var_y/gtype/주문 등 동일할 때 재계산 방지"""
         gtype, vx, vy, ox, oy = args
         if vx == vy:  # 단변량
             return eda.선택해서_그래프_그리기(
                 df, col=vx, graph_type=gtype, order=ox, rot_angle=rot
             )
-        # 이변량
         return eda.선택해서_그래프_그리기_이변량(
-            df, x_var=vx, y_var=vy, graph_type=gtype,
-            order=ox, hue_order=oy, rot_angle=rot
+            df,
+            x_var=vx,
+            y_var=vy,
+            graph_type=gtype,
+            order=ox,
+            hue_order=oy,
+            rot_angle=rot,
         )
 
-    # ------------------------------------------------------------------ #
-    # ① 모든 변수 그래프
-    # ------------------------------------------------------------------ #
+    # ==================================================================
+    # ① 전체 그래프
+    # ==================================================================
     if mode == "① 전체 그래프":
         w = st.sidebar.slider("Figure width", 4, 20, 4 * len(df_sel.columns))
         h = st.sidebar.slider("Figure height", 4, 20, 4 * len(df_sel.columns))
         if st.button("🖼️ 모든 그래프 그리기", key="btn_allplots"):
-            eda.모든_그래프_그리기(df_sel, width=w, height=h)  # utils 내부 캐싱
+            eda.모든_그래프_그리기(df_sel, width=w, height=h)
 
-    # ------------------------------------------------------------------ #
+    # ==================================================================
     # ② 단일 변수 분석
-    # ------------------------------------------------------------------ #
+    # ==================================================================
     elif mode == "② 단일 변수 분석":
         col = st.selectbox("🔸 변수 선택", df_sel.columns, key="single_col")
-        w   = st.sidebar.slider("Fig width", 4, 12, 8)
-        h   = st.sidebar.slider("Fig height", 4, 12, 6)
-        trans = st.sidebar.selectbox("변환(수치형)", ("없음", "로그변환", "제곱근", "제곱"))
+        w = st.sidebar.slider("Fig width", 4, 12, 8)
+        h = st.sidebar.slider("Fig height", 4, 12, 6)
+        trans = st.sidebar.selectbox(
+            "변환(수치형)", ("없음", "로그변환", "제곱근", "제곱")
+        )
         show_tbl = st.sidebar.checkbox("통계 요약표", value=True)
 
-        # 변환 적용(선택 시에만 새로운 DataFrame 생성)
+        # ── 변환 적용
         if trans != "없음" and pd.api.types.is_numeric_dtype(df_sel[col]):
             df_work = eda.transform_numeric_data(df_sel.copy(), col, trans)
             suffix = {"로그변환": "log", "제곱근": "sqrt", "제곱": "squared"}[trans]
@@ -583,10 +594,10 @@ def data_analysis_tab() -> None:
                 st.subheader("📊 빈도표")
                 st.dataframe(eda.summarize_cat(df_work[col]))
 
-    # ------------------------------------------------------------------ #
-    # ③ 선택 그래프 (가장 많이 쓰이므로 캐시 최적화)
-    # ------------------------------------------------------------------ #
-    else:
+    # ==================================================================
+    # ③ 선택 그래프
+    # ==================================================================
+    elif mode == "③ 선택 그래프":
         col1, col2 = st.columns(2)
         var_x = col1.selectbox("가로축", df_sel.columns, key="x_da")
         var_y = col2.selectbox("세로축", df_sel.columns, key="y_da")
@@ -595,26 +606,100 @@ def data_analysis_tab() -> None:
             ["막대그래프", "히스토그램", "도수분포다각형", "꺾은선그래프", "상자그림", "산점도"],
             key="gtype_da",
         )
-        rot_angle = st.radio("X축 레이블 각도", [0, 45, 90], horizontal=True, key="rot_da")
+        rot_angle = st.radio(
+            "X축 레이블 각도", [0, 45, 90], horizontal=True, key="rot_da"
+        )
 
-        # 파라미터 저장(버튼 누를 때만 세션에 기록)
         if st.button("🖼️ 그래프 그리기", key="btn_choice_plot"):
             st.session_state.da_plot_args = (
                 gtype,
                 var_x,
                 var_y,
-                make_numeric_order(df_sel[var_x]) if not pd.api.types.is_numeric_dtype(df_sel[var_x]) else None,
-                make_numeric_order(df_sel[var_y]) if not pd.api.types.is_numeric_dtype(df_sel[var_y]) else None,
+                make_numeric_order(df_sel[var_x])
+                if not pd.api.types.is_numeric_dtype(df_sel[var_x])
+                else None,
+                make_numeric_order(df_sel[var_y])
+                if not pd.api.types.is_numeric_dtype(df_sel[var_y])
+                else None,
             )
             st.session_state.da_rot = rot_angle
 
-        # 저장된 파라미터가 있을 때만 그림 출력
         if "da_plot_args" in st.session_state:
-            fig = _cached_choice_plot(df_sel, st.session_state.da_plot_args, st.session_state.da_rot)
+            fig = _cached_choice_plot(
+                df_sel, st.session_state.da_plot_args, st.session_state.da_rot
+            )
             if fig:
                 st.pyplot(fig, use_container_width=True)
                 g, vx, vy, *_ = st.session_state.da_plot_args
                 st.session_state.last_code = f"# 시각화 코드 생략 – {g} for {vx}/{vy}"
+
+    # ── ④ 신뢰구간 추정 ────────────────────────────────
+    elif mode == "④ 신뢰구간 추정 🔹":
+        import numpy as np
+        from scipy.stats import t
+
+        # 1) 변수 선택
+        num_cols = [c for c in df_sel.columns if pd.api.types.is_numeric_dtype(df_sel[c])]
+        cat_cols = [c for c in df_sel.columns if c not in num_cols]
+        num_var  = st.selectbox("📐 수치형 변수", num_cols)
+        grp_var  = st.selectbox("🗂️ 그룹 변수 (없으면 ‘(단일)’) ", ["(단일)"] + cat_cols)
+        conf     = st.radio("신뢰수준 선택", (95, 99), horizontal=True)
+        alpha    = 1 - conf/100
+
+        if st.button("📏 신뢰구간 추정"):
+
+            # ― (단일) 전체 신뢰구간 ―
+            if grp_var == "(단일)":
+                s    = df_sel[num_var].dropna()
+                n    = len(s)
+                mean = s.mean()
+                se   = s.std(ddof=1)/np.sqrt(n)
+                h    = t.ppf(1-alpha/2, max(n-1,1)) * se
+                ci_df = pd.DataFrame({
+                    "label": ["전체"],
+                    "mean":  [mean],
+                    "lo":    [mean-h],
+                    "hi":    [mean+h]
+                })
+
+            # ― 그룹별 신뢰구간 ―
+            else:
+                stats = (
+                    df_sel
+                    .groupby(grp_var)[num_var]
+                    .agg(count="count", mean="mean", std="std")
+                    .reset_index()
+                    .rename(columns={grp_var: "label"})
+                )
+                stats["se"] = stats["std"] / np.sqrt(stats["count"])
+                df_t = t.ppf(1-alpha/2, np.maximum(stats["count"]-1, 1))
+                stats["lo"] = stats["mean"] - df_t * stats["se"]
+                stats["hi"] = stats["mean"] + df_t * stats["se"]
+
+                ci_df = stats[["label", "mean", "lo", "hi"]]
+
+            # 2) 시각화
+            fig, ax = plt.subplots(figsize=(8, 0.6*len(ci_df)+1))
+            ax.errorbar(
+                x=ci_df["mean"],
+                y=ci_df["label"],
+                xerr=[ci_df["mean"]-ci_df["lo"], ci_df["hi"]-ci_df["mean"]],
+                fmt="o", capsize=6, elinewidth=2, markersize=5
+            )
+            ax.set_xlabel(f"{num_var}  (신뢰수준 {conf}%)")
+            ax.set_title("그룹별 평균과 신뢰구간")
+            ax.grid(axis="x", ls="--", alpha=0.4)
+            st.pyplot(fig, use_container_width=True)
+
+            # 3) LaTeX 부등호
+            st.markdown("#### 📑 신뢰구간 결과")
+            for _, row in ci_df.iterrows():
+                lbl, m, lo, hi = row["label"], row["mean"], row["lo"], row["hi"]
+                st.latex(
+                    rf"\text{{{lbl}}}: \; {lo:.2f} \;\le\; \mu \;\le\; {hi:.2f}"
+                )
+            # 4) 코드 저장
+            st.session_state.last_code = f"# CI for {num_var} by {grp_var}, {conf}%"
 
     # ------------------------------------------------------------------ #
     # 🧑🏻‍🏫 AI 피드백
