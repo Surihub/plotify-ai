@@ -77,6 +77,59 @@ def summarize(df):
 
 
 @st.cache_data
+def _base_summary(df_num: pd.DataFrame) -> pd.DataFrame:
+    """수치형 DataFrame → 기초 통계량(+분산·최빈값)"""
+    summ = df_num.describe().T.round(2)
+    summ["분산"]   = df_num.var().round(2)
+    modes = df_num.mode().iloc[0].astype(str)
+    summ["최빈값"] = modes
+    summ = summ[
+        ["count", "mean", "std", "min", "25%", "50%", "75%", "max", "분산", "최빈값"]
+    ]
+    summ.columns = [
+        "개수", "평균", "표준편차", "최솟값", "제1사분위수",
+        "중앙값", "제3사분위수", "최댓값", "분산", "최빈값"
+    ]
+    return summ
+# 수정된 summarize: 그룹별(또는 전체) 통계량을 반환, 행은 그룹(전체 혹은 그룹명)·변수, 열은 통계량
+# 그룹별 통계량 및 전체 통계량 반환 함수
+from typing import Optional
+import pandas as pd
+import numpy as np
+@st.cache_data
+
+def summarize(df: pd.DataFrame, by: Optional[str] = None) -> pd.DataFrame:
+    num_cols = df.select_dtypes(include="number").columns.tolist()
+    if not num_cols:
+        return pd.DataFrame()
+    stats = ["count","mean","std","min","25%","50%","75%","max"]
+    labels = ["개수","평균","표준편차","최솟값","제1사분위수","중앙값","제3사분위수","최댓값","분산","최빈값"]
+    # 전체 통계량
+    if by is None:
+        desc = df[num_cols].describe().loc[stats].round(2)
+        desc.loc["var"]  = df[num_cols].var(ddof=1).round(2)
+        desc.loc["mode"] = df[num_cols].mode().iloc[0].astype(str)
+        desc.index = labels
+        return desc.T
+    # 그룹별 통계량
+    rows = []
+    for grp, sub in df.groupby(by):
+        desc = sub[num_cols].describe().loc[stats].round(2)
+        desc.loc["var"] = sub[num_cols].var(ddof=1).round(2)
+        modes = sub[num_cols].mode()
+        desc.loc["mode"] = modes.iloc[0].astype(str) if not modes.empty else np.nan
+        desc.index = labels
+        df_t = desc.T
+        df_t.insert(0, by, grp)
+        df_t.insert(1, "변수", df_t.index)
+        df_t = df_t.set_index([by, "변수"])
+        rows.append(df_t)
+    result = pd.concat(rows)
+    return result[labels]
+
+
+
+@st.cache_data
 def summarize_cat(df):
     # 범주형 데이터 요약 함수 : 
     frequency = df.value_counts()
