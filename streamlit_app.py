@@ -515,11 +515,11 @@ def data_analysis_tab() -> None:
         """
     )
 
-    # ───────────── 데이터 준비 ─────────────
-    # 0) 데이터프레임 존재 여부 확인
-    if "df" not in st.session_state or not isinstance(st.session_state.df, pd.DataFrame):
-        st.error("먼저 데이터를 업로드하거나 Plan 탭에서 변수 선택을 완료하세요.")
-        st.stop()
+    # # ───────────── 데이터 준비 ─────────────
+    # # 0) 데이터프레임 존재 여부 확인
+    # if "df" not in st.session_state or not isinstance(st.session_state.df, pd.DataFrame):
+    #     st.error("먼저 데이터를 업로드하거나 Plan 탭에서 변수 선택을 완료하세요.")
+    #     st.stop()
 
     # 1) 변수 목록 확인
     var_list: list[str] = st.session_state.get("var_list", [])
