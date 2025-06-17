@@ -520,6 +520,14 @@ def data_analysis_tab() -> None:
     # if "df" not in st.session_state or not isinstance(st.session_state.df, pd.DataFrame):
     #     st.error("먼저 데이터를 업로드하거나 Plan 탭에서 변수 선택을 완료하세요.")
     #     st.stop()
+    # ───────────── 데이터 준비 ─────────────
+    # 0) 데이터프레임 존재 여부 확인 (없으면 즉시 재로드 시도)
+    if "df" not in st.session_state or st.session_state.df is None:
+        try:
+            st.session_state.df = load_data()       # Google Sheets에서 다시 불러오기
+        except Exception as e:
+            st.error(f"데이터를 불러오지 못했습니다: {e}")
+            st.stop()
 
     # 1) 변수 목록 확인
     var_list: list[str] = st.session_state.get("var_list", [])
@@ -535,6 +543,8 @@ def data_analysis_tab() -> None:
 
     # 3) 검증 통과 후 서브데이터프레임 생성
     df_sel = st.session_state.df[var_list]
+
+
 
     show_user_card(
         "📌 나의 입력 요약",
