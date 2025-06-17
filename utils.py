@@ -93,54 +93,119 @@ def _base_summary(df_num: pd.DataFrame) -> pd.DataFrame:
     return summ
 # 수정된 summarize: 그룹별(또는 전체) 통계량을 반환, 행은 그룹(전체 혹은 그룹명)·변수, 열은 통계량
 # 그룹별 통계량 및 전체 통계량 반환 함수
-from typing import Optional
+from typing import Optional, Union
 import pandas as pd
 import numpy as np
 @st.cache_data
 
-def summarize(df: pd.DataFrame, by: Optional[str] = None) -> pd.DataFrame:
+# def summarize(df: pd.DataFrame, by: Optional[str] = None) -> pd.DataFrame:
+#     num_cols = df.select_dtypes(include="number").columns.tolist()
+#     if not num_cols:
+#         return pd.DataFrame()
+#     stats = ["count","mean","std","min","25%","50%","75%","max"]
+#     labels = ["개수","평균","표준편차","최솟값","제1사분위수","중앙값","제3사분위수","최댓값","분산","최빈값"]
+#     # 전체 통계량
+#     if by is None:
+#         desc = df[num_cols].describe().loc[stats].round(2)
+#         desc.loc["var"]  = df[num_cols].var(ddof=1).round(2)
+#         desc.loc["mode"] = df[num_cols].mode().iloc[0].astype(str)
+#         desc.index = labels
+#         return desc.T
+#     # 그룹별 통계량
+#     rows = []
+#     for grp, sub in df.groupby(by):
+#         desc = sub[num_cols].describe().loc[stats].round(2)
+#         desc.loc["var"] = sub[num_cols].var(ddof=1).round(2)
+#         modes = sub[num_cols].mode()
+#         desc.loc["mode"] = modes.iloc[0].astype(str) if not modes.empty else np.nan
+#         desc.index = labels
+#         df_t = desc.T
+#         df_t.insert(0, by, grp)
+#         df_t.insert(1, "변수", df_t.index)
+#         df_t = df_t.set_index([by, "변수"])
+#         rows.append(df_t)
+#     result = pd.concat(rows)
+#     return result[labels]
+
+def _freq_table(s: pd.Series) -> pd.DataFrame:
+    """단일 범주형 시리즈 → 빈도·비율(%) 테이블"""
+    vc  = s.value_counts(dropna=False)
+    pct = (vc / len(s) * 100).round(2)
+    tbl = pd.DataFrame({"빈도": vc, "비율(%)": pct})
+    tbl.index.name = s.name
+    return tbl
+
+def summarize(df: pd.DataFrame, by: Optional[str] = None) -> Union[pd.DataFrame, dict]:
+    """
+    ▶ 수치형만 있을 때     : 기존 기초 통계량 반환
+    ▶ 범주형만 있을 때     : 빈도·비율 테이블 반환 (단일 변수는 DataFrame, 다중은 dict)
+    ▶ 수치+범주 혼합 선택 : {"numeric": DataFrame, "categorical": dict} 형태
+
+    by : 그룹 변수 지정 시 그룹별 결과
+         - 수치형 → (그룹, 변수)  MultiIndex 행 · 통계량 열
+         - 범주형 → {변수: DataFrame(행=그룹, 열=범주값+%)}
+    """
     num_cols = df.select_dtypes(include="number").columns.tolist()
-    if not num_cols:
-        return pd.DataFrame()
-    stats = ["count","mean","std","min","25%","50%","75%","max"]
-    labels = ["개수","평균","표준편차","최솟값","제1사분위수","중앙값","제3사분위수","최댓값","분산","최빈값"]
-    # 전체 통계량
-    if by is None:
-        desc = df[num_cols].describe().loc[stats].round(2)
-        desc.loc["var"]  = df[num_cols].var(ddof=1).round(2)
-        desc.loc["mode"] = df[num_cols].mode().iloc[0].astype(str)
-        desc.index = labels
-        return desc.T
-    # 그룹별 통계량
-    rows = []
-    for grp, sub in df.groupby(by):
-        desc = sub[num_cols].describe().loc[stats].round(2)
-        desc.loc["var"] = sub[num_cols].var(ddof=1).round(2)
-        modes = sub[num_cols].mode()
-        desc.loc["mode"] = modes.iloc[0].astype(str) if not modes.empty else np.nan
-        desc.index = labels
-        df_t = desc.T
-        df_t.insert(0, by, grp)
-        df_t.insert(1, "변수", df_t.index)
-        df_t = df_t.set_index([by, "변수"])
-        rows.append(df_t)
-    result = pd.concat(rows)
-    return result[labels]
+    cat_cols = [c for c in df.columns if c not in num_cols]
 
+    # ────────────────────────────────────────────
+    # 1) 수치형 통계량 (기존 로직 유지)
+    # ────────────────────────────────────────────
+    def numeric_summary(data: pd.DataFrame, group: Optional[str]):
+        stats  = ["count","mean","std","min","25%","50%","75%","max"]
+        labels = ["개수","평균","표준편차","최솟값","제1사분위수","중앙값","제3사분위수","최댓값","분산","최빈값"]
+        if group is None:
+            desc = data.describe().loc[stats].round(2)
+            desc.loc["var"]  = data.var(ddof=1).round(2)
+            desc.loc["mode"] = data.mode().iloc[0].astype(str)
+            desc.index = labels
+            return desc.T
+        rows = []
+        for g, sub in data.groupby(group):
+            d = sub.describe().loc[stats].round(2)
+            d.loc["var"]  = sub.var(ddof=1).round(2)
+            modes = sub.mode()
+            d.loc["mode"] = modes.iloc[0].astype(str) if not modes.empty else np.nan
+            d.index = labels
+            t = d.T
+            t.insert(0, group, g)
+            t.insert(1, "변수", t.index)
+            t = t.set_index([group, "변수"])
+            rows.append(t)
+        out = pd.concat(rows)
+        return out[labels]
 
+    # ────────────────────────────────────────────
+    # 2) 범주형 빈도표
+    # ────────────────────────────────────────────
+    def categorical_summary(data: pd.DataFrame, group: Optional[str]):
+        if group is None:
+            tbls = {col: _freq_table(data[col]) for col in data.columns}
+            return tbls[col] if len(tbls)==1 else tbls
+        # 그룹별: 각 그룹마다 value_counts → DataFrame(행=그룹, 열=범주/비율)
+        result = {}
+        for col in data.columns:
+            ct = (
+                data.groupby(group)[col]
+                .value_counts(dropna=False)
+                .unstack(fill_value=0)
+            )
+            pct = (ct.div(ct.sum(axis=1), axis=0)*100).round(2).add_suffix("%")
+            result[col] = pd.concat([ct, pct], axis=1)
+        return result[col] if len(result)==1 else result
 
-@st.cache_data
-def summarize_cat(df):
-    # 범주형 데이터 요약 함수 : 
-    frequency = df.value_counts()
-    mode_value = df.mode()[0]
-    mode_freq = frequency.loc[mode_value]
-    summary = pd.DataFrame({
-        '빈도': frequency,
-        '비율': np.round(frequency / len(df), 2)
-    })
+    out_num, out_cat = None, None
+    if num_cols:
+        out_num = numeric_summary(df[num_cols + ([] if by is None else [by])], by)
+    if cat_cols:
+        out_cat = categorical_summary(df[cat_cols + ([] if by is None else [by])], by)
 
-    return summary
+    # 반환 형태 조정
+    if out_num is not None and out_cat is None:
+        return out_num
+    if out_num is None and out_cat is not None:
+        return out_cat
+    return {"numeric": out_num, "categorical": out_cat}
 
 @st.cache_data
 def table_num(df, bin_width):
