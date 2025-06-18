@@ -163,7 +163,9 @@ def summarize(df: pd.DataFrame, by: Optional[str] = None) -> Union[pd.DataFrame,
         rows = []
         for g, sub in data.groupby(group):
             d = sub.describe().loc[stats].round(2)
-            d.loc["var"]  = sub.var(ddof=1).round(2)
+            # 수정 후 (숫자형 컬럼만 선택)
+            numeric_cols = sub.select_dtypes(include='number')
+            d.loc["var"] = numeric_cols.var(ddof=1).round(2)
             modes = sub.mode()
             d.loc["mode"] = modes.iloc[0].astype(str) if not modes.empty else np.nan
             d.index = labels
