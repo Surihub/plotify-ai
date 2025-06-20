@@ -62,19 +62,46 @@ def load_data(dataset_name, uploaded_file, data_ready):
 #             st.warning("csv 파일만 업로드 가능합니다. ")
 #         return df
 
-@st.cache_data
-def summarize(df):
-    # 기초 통계량 요약 함수
-    summ = df.describe()
-    summ = np.round(summ, 2)
+@st.cache_data(show_spinner="📊 통계량 계산 중…")
+def summarize(df: pd.DataFrame, by: str | None = None) -> pd.DataFrame | dict[str, pd.DataFrame]:
+    """
+    ▸ 수치형 변수의 기초 통계 + 분산 + 최빈값
+    ▸ `by`가 주어지면 그룹별 결과를 dict 로 반환
+    """
+    # ── 1. 수치형 컬럼만 추출 ──────────────────────────────
+    num_df = df.select_dtypes(include="number")
+    if num_df.empty:
+        raise ValueError("수치형 변수가 없습니다.")
 
-    summ.loc['분산'] = np.round(df.var(), 2)
-    modes = df.mode().dropna()  # 최빈값을 계산하고 결측값 제거
-    mode_str = ', '.join(modes.astype(str))  # 모든 최빈값을 문자열로 변환하고 쉼표로 연결
-    summ.loc['최빈값'] = mode_str  # 문자열로 변환된 최빈값을 할당
-    summ.index = ['개수', '평균', '표준편차', '최솟값', '제1사분위수', '중앙값', '제3사분위수', '최댓값', '분산', '최빈값']
-    return summ
+    # ── 2. 그룹 변수 처리 (Series 보장) ───────────────────
+    if by is not None:
+        if by not in df.columns:
+            raise KeyError(f"그룹 변수 '{by}' 를 찾을 수 없습니다.")
+        grp = df[by]
+        if isinstance(grp, pd.DataFrame):
+            grp = grp.iloc[:, 0]           # 첫 열만 사용
+        groups = num_df.groupby(grp)
+    else:
+        groups = [("__ALL__", num_df)]
 
+    # ── 3. 각 그룹별 요약표 계산 ──────────────────────────
+    summaries = {}
+    for gname, gdf in groups:
+        summ = gdf.describe().round(2)              # 개수~최댓값
+        summ.loc["분산"]  = gdf.var().round(2)       # 분산
+        modes = gdf.mode().dropna(how="all")         # 최빈값(여러 개 가능)
+        mode_row = []
+        for col in gdf.columns:
+            vals = modes[col].dropna().astype(str)
+            mode_row.append(", ".join(vals) if not vals.empty else "")
+        summ.loc["최빈값"] = mode_row
+        summ.index = ["개수", "평균", "표준편차", "최솟값",
+                      "제1사분위수", "중앙값", "제3사분위수",
+                      "최댓값", "분산", "최빈값"]
+        summaries[gname] = summ
+
+    # ── 4. 반환 형식 정리 ─────────────────────────────────
+    return summaries if by is not None else summaries["__ALL__"]
 
 @st.cache_data
 def _base_summary(df_num: pd.DataFrame) -> pd.DataFrame:
