@@ -86,7 +86,24 @@ def login() -> None:
 
 login()
 
+def extract_number(text):
+    circled = {"①":1,"②":2,"③":3,"④":4,"⑤":5,"⑥":6,"⑦":7}
+    if isinstance(text,str) and text:
+        if text[0] in circled:                # ①~⑦
+            return circled[text[0]]
+        m = re.match(r"\d+", text)            # ‘3번’, ‘6회’ 등
+        if m: return int(m.group())
+    return None
 
+
+
+    
+def convert_labeled_column(df, colname):
+    """범주형 라벨에서 숫자를 추출해 수치형 + 범주형 컬럼 생성"""
+    if colname not in df.columns:
+        return
+    df[f"{colname}_num"] = df[colname].apply(extract_number)
+    df[f"{colname}_cat"] = df[colname].astype("category")
 
 # ===== 5. 헬퍼 함수 =====
 def split_sentences(text: str) -> list[str]:
@@ -204,15 +221,18 @@ def connect_sheet(sheet: str = "response"):
     gc = gspread.authorize(creds)
     return gc.open_by_key(st.secrets.google_sheets.sheet_id).worksheet(sheet)
 
-
-# ===== 11. 데이터 로드 (Google Sheets › data 탭) =====
+# ===== 11. 데이터 로드 =====
 @st.cache_data(show_spinner="📥 시트에서 데이터 불러오는 중…")
 def load_data() -> pd.DataFrame:
     ws = connect_sheet("data")
     raw = ws.get_all_values()
-    df = pd.DataFrame(raw[1:], columns=raw[0])
-    sel_cols = [1, 3, 4, 7, 8, 9, 10, 11, 12, 13]
-    df = df.iloc[:, sel_cols].apply(pd.to_numeric, errors="ignore")
+    df  = pd.DataFrame(raw[1:], columns=raw[0])
+
+    # ① ‘(수)’로 시작하는 열은 무조건 숫자로 변환
+    num_cols = [c for c in df.columns if c.startswith("(수)")]
+    df[num_cols] = df[num_cols].apply(pd.to_numeric, errors="coerce")
+
+    # ② 나머지는 기존 문자열 그대로 유지
     st.session_state.df = df
     return df.copy()
 
@@ -542,8 +562,18 @@ def data_analysis_tab() -> None:
         st.stop()
 
     # 3) 검증 통과 후 서브데이터프레임 생성
-    df_sel = st.session_state.df[var_list]
+    # ---------------------------------------------
+    # 3) 검증 통과 후 서브데이터프레임 생성
+    df_sel = st.session_state.df[var_list].copy()
 
+    # ▶ 선택한 열 중 ‘숫자 추출 가능’한 범주형 → 두 갈래 컬럼 추가
+    for col in var_list:
+        if df_sel[col].dtype == "object":
+            if df_sel[col].astype(str).str.contains(r"\d").any():
+                df_sel[f"{col}_cat"] = df_sel[col]                 # 원본 라벨
+                df_sel[f"{col}_num"] = df_sel[col].apply(extract_number)
+    # ---------------------------------------------
+                
 
 
     show_user_card(
@@ -594,184 +624,43 @@ def data_analysis_tab() -> None:
             rot_angle=rot,
         )
 
-    # # ==================================================================
-    # # ① 전체 그래프
-    # # ==================================================================
-    # if mode == "① 전체 그래프":
-    #     w = st.sidebar.slider("Figure width", 4, 20, 4 * len(df_sel.columns))
-    #     h = st.sidebar.slider("Figure height", 4, 20, 4 * len(df_sel.columns))
-    #     if st.button("🖼️ 모든 그래프 그리기", key="btn_allplots"):
-    #         eda.모든_그래프_그리기(df_sel, width=w, height=h)
-
-    # # ==================================================================
-    # # ② 단일 변수 분석
-    # # ==================================================================
-    # elif mode == "② 단일 변수 분석":
-    #     col = st.selectbox("🔸 변수 선택", df_sel.columns, key="single_col")
-    #     w = st.sidebar.slider("Fig width", 4, 12, 8)
-    #     h = st.sidebar.slider("Fig height", 4, 12, 6)
-    #     trans = st.sidebar.selectbox(
-    #         "변환(수치형)", ("없음", "로그변환", "제곱근", "제곱")
-    #     )
-    #     show_tbl = st.sidebar.checkbox("통계 요약표", value=True)
-
-    #     # ── 변환 적용
-    #     if trans != "없음" and pd.api.types.is_numeric_dtype(df_sel[col]):
-    #         df_work = eda.transform_numeric_data(df_sel.copy(), col, trans)
-    #         suffix = {"로그변환": "log", "제곱근": "sqrt", "제곱": "squared"}[trans]
-    #         col = f"{col}_{suffix}"
-    #     else:
-    #         df_work = df_sel
-
-    #     if st.button("🖼️ 그래프 그리기(단일)", key="btn_univar"):
-    #         eda.하나씩_그래프_그리기(df_work[[col]], w, h)
-
-    #     if show_tbl:
-    #         st.divider()
-    #         if pd.api.types.is_numeric_dtype(df_work[col]):
-    #             st.subheader("📊 기초 통계량")
-    #             st.dataframe(eda.summarize(df_work[[col]]))
-    #         else:
-    #             st.subheader("📊 빈도표")
-    #             st.dataframe(eda.summarize_cat(df_work[col]))
-
-    # # ==================================================================
-    # # ③ 선택 그래프
-    # # ==================================================================
-    # elif mode == "③ 선택 그래프":
-    #     col1, col2 = st.columns(2)
-    #     var_x = col1.selectbox("가로축", df_sel.columns, key="x_da")
-    #     var_y = col2.selectbox("세로축", df_sel.columns, key="y_da")
-    #     gtype = st.selectbox(
-    #         "그래프 종류",
-    #         ["막대그래프", "히스토그램", "도수분포다각형", "꺾은선그래프", "상자그림", "산점도"],
-    #         key="gtype_da",
-    #     )
-    #     rot_angle = st.radio(
-    #         "X축 레이블 각도", [0, 45, 90], horizontal=True, key="rot_da"
-    #     )
-
-    #     if st.button("🖼️ 그래프 그리기", key="btn_choice_plot"):
-    #         st.session_state.da_plot_args = (
-    #             gtype,
-    #             var_x,
-    #             var_y,
-    #             make_numeric_order(df_sel[var_x])
-    #             if not pd.api.types.is_numeric_dtype(df_sel[var_x])
-    #             else None,
-    #             make_numeric_order(df_sel[var_y])
-    #             if not pd.api.types.is_numeric_dtype(df_sel[var_y])
-    #             else None,
-    #         )
-    #         st.session_state.da_rot = rot_angle
-
-    #     if "da_plot_args" in st.session_state:
-    #         fig = _cached_choice_plot(
-    #             df_sel, st.session_state.da_plot_args, st.session_state.da_rot
-    #         )
-    #         if fig:
-    #             st.pyplot(fig, use_container_width=True)
-    #             g, vx, vy, *_ = st.session_state.da_plot_args
-    #             st.session_state.last_code = f"# 시각화 코드 생략 – {g} for {vx}/{vy}"
-
-    # # ── ④ 신뢰구간 추정 ────────────────────────────────
-    # elif mode == "④ 신뢰구간 추정 🔹":
-    #     import numpy as np
-    #     from scipy.stats import t
-
-    #     # 1) 변수 선택
-    #     num_cols = [c for c in df_sel.columns if pd.api.types.is_numeric_dtype(df_sel[c])]
-    #     cat_cols = [c for c in df_sel.columns if c not in num_cols]
-    #     num_var  = st.selectbox("📐 수치형 변수", num_cols)
-    #     grp_var  = st.selectbox("🗂️ 그룹 변수 (없으면 ‘(단일)’) ", ["(단일)"] + cat_cols)
-    #     conf     = st.radio("신뢰수준 선택", (95, 99), horizontal=True)
-    #     alpha    = 1 - conf/100
-
     # AFTER ─────────────────────────────────────────────
     st.markdown("#### 🎛️ 분석 도구 (모든 기능 한눈에)")
 
+    # ===== UI: ① 통계량 (단일·다변량, - 그룹 X) =====
+    with st.expander("① 통계량 (그룹 없이 전체 집계)", expanded=False):
 
-    # # ===================== 통계량 expander (UI) ======================
-    # with st.expander("① 통계량 (단일·다변량)", expanded=False):
-    #     # 1) 변수 입력 -------------------------------------------------
-    #     num_cols = [c for c in df_sel.columns if pd.api.types.is_numeric_dtype(df_sel[c])]
-    #     cat_cols = [c for c in df_sel.columns if c not in num_cols]
+        # 1) 수치 컬럼만 추출 ----------------------------------------------
+        num_cols = [c for c in df_sel.columns
+                    if c.endswith("_num") or pd.api.types.is_numeric_dtype(df_sel[c])]
 
-    #     target_vars = st.multiselect("수치 변수 선택 (1개 이상)", num_cols, key="stat_nums")
-    #     grp_var = st.selectbox("그룹 변수(없으면 전체)", ["(없음)"] + cat_cols, key="stat_grp")
-
-    #     # 2) 실행 ------------------------------------------------------
-    #     if st.button("📊 통계량 계산", key="btn_stats"):
-    #         df_stat = df_sel[target_vars + ([] if grp_var == "(없음)" else [grp_var])]
-
-    #         result = eda.summarize(
-    #             df_stat,
-    #             by=None if grp_var == "(없음)" else grp_var
-    #         )
-
-    #         # 3) 출력 --------------------------------------------------
-    #         if isinstance(result, dict):          # 그룹별 결과
-    #             for g, tbl in result.items():
-    #                 st.write(f"#### ▶ 그룹: {g}")
-    #                 st.dataframe(tbl)
-    #         else:                                 # 전체 결과
-    #             st.dataframe(result)
-
-
-
-    # ===== UI: ① 통계량 (다단 레이아웃) =====
-    with st.expander("① 통계량 (단일·다변량)", expanded=False):
-        # 변수·그룹 선택을 두 단으로 배치
-        num_cols = df_sel.select_dtypes(include="number").columns.tolist()
-        cat_cols = [c for c in df_sel.columns if c not in num_cols]
-        col1, col2 = st.columns(2)
-        target_vars = col1.multiselect(
+        # 2) 입력 위젯 -----------------------------------------------------
+        target_vars = st.multiselect(
             "수치 변수 선택 (1개 이상)", num_cols,
             default=st.session_state.get("stat_nums", num_cols[:1]),
             key="stat_nums"
         )
-        grp_var = col2.selectbox(
-            "그룹 변수 (없으면 전체)", ["(없음)"] + cat_cols,
-            key="stat_grp"
-        )
+
+        # 3) 실행 버튼 -----------------------------------------------------
         if st.button("📊 통계량 계산", key="btn_stats"):
-            by = None if grp_var == "(없음)" else grp_var
-            sel_df = df_sel[target_vars + ([] if by is None else [by])]
-            df_stats = eda.summarize(sel_df, by=by)
+
+            # ── (A) 입력 검증 ──────────────────────────────────────────
+            if not target_vars:
+                st.warning("👉 수치 변수를 하나 이상 선택하세요.")
+                st.stop()
+
+            # ── (B) 통계 요약 -------------------------------------------
+            sel_df   = df_sel[target_vars].copy()
+            df_stats = eda.summarize(sel_df, by=None)   # ← 그룹 변수 없음
             st.dataframe(df_stats)
-            # 상관계수 표시 (변수 2개 이상 선택 시)
+
+            # ── (C) 상관계수(선택 변수 ≥2) -----------------------------
             if len(target_vars) >= 2:
                 corr = sel_df[target_vars].corr().round(2)
                 st.subheader("🔗 상관계수")
                 st.dataframe(corr)
-    # # ===== UI: ① 통계량 (다단 레이아웃) =====
-    # with st.expander("① 통계량 (단일·다변량)", expanded=False):
-    #     # 변수·그룹 선택을 두 단으로 배치
-    #     num_cols = df_sel.select_dtypes(include="number").columns.tolist()
-    #     cat_cols = [c for c in df_sel.columns if c not in num_cols]
-    #     col1, col2 = st.columns(2)
-    #     target_vars = col1.multiselect(
-    #         "수치 변수 선택 (1개 이상)", num_cols,
-    #         default=st.session_state.get("stat_nums", num_cols[:1]),
-    #         key="stat_nums"
-    #     )
-    #     grp_var = col2.selectbox(
-    #         "그룹 변수 (없으면 전체)", ["(없음)"] + cat_cols,
-    #         key="stat_grp"
-    #     )
-    #     if st.button("📊 통계량 계산", key="btn_stats"):
-    #         by = None if grp_var == "(없음)" else grp_var
-    #         sel_df = df_sel[target_vars + ([] if by is None else [by])]
-    #         df_stats = eda.summarize(sel_df, by=by)
-    #         st.dataframe(df_stats)
 
 
-    # ─────────────────────────────────────────────────────
-    # ① 통계량  (단일 · 다변량)
-    # ─────────────────────────────────────────────────────
-    # ─────────────────────────────────────────────────────
-    # ② 시각화  (단일 · 다변량)
-    # ─────────────────────────────────────────────────────
     with st.expander("② 시각화 (단일·다변량)", expanded=True):
         col1, col2 = st.columns(2)
         var_x = col1.selectbox("가로축(X)", df_sel.columns, key="viz_x")
@@ -782,16 +671,6 @@ def data_analysis_tab() -> None:
             key="viz_gtype"
         )
 
-        # # 기본 크기 + 버튼으로 조정
-        # if "viz_w" not in st.session_state: st.session_state.viz_w = 8
-        # if "viz_h" not in st.session_state: st.session_state.viz_h = 6
-        # c1, c2, c3, c4 = st.columns(4)
-        # if c1.button("➖ 너비", key="w_dec"): st.session_state.viz_w = max(4, st.session_state.viz_w - 1)
-        # c2.write(f"w = {st.session_state.viz_w}")
-        # if c3.button("➕ 너비", key="w_inc"): st.session_state.viz_w += 1
-        # if c1.button("➖ 높이", key="h_dec"): st.session_state.viz_h = max(3, st.session_state.viz_h - 1)
-        # c2.write(f"h = {st.session_state.viz_h}")
-        # if c3.button("➕ 높이", key="h_inc"): st.session_state.viz_h += 1
 
         if st.button("🖼️ 그래프 그리기", key="btn_viz"):
             vx = var_x
