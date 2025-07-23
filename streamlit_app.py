@@ -173,10 +173,7 @@ def push_last_log() -> None:
         log.get("ai_feedback", ""),
         log.get("ai_level", ""),
     ]
-    try:
-        connect_sheet().append_row(row, value_input_option="USER_ENTERED")
-    except Exception as e:
-        st.error(f"Sheets 전송 실패: {e}")
+    connect_sheet().append_row(row, value_input_option="USER_ENTERED")
 
 
 # ===== 8. 세션 초기값 =====
@@ -481,7 +478,7 @@ def plan_tab() -> None:
 
     # 3) 입력 위젯 -------------------------------------------------------
     st.session_state.var_list = st.multiselect(
-        "분석 변수 선택",
+        "분석 변수 선택 : 변수를 하나씩 선택해주세요. 약간 로딩이 걸릴 수 있으니 기다려주세요!",
         options=df.columns,
         default=st.session_state.var_list or [],
     )
@@ -662,9 +659,29 @@ def data_analysis_tab() -> None:
 
 
     with st.expander("② 시각화 (단일·다변량)", expanded=True):
+        # col1, col2 = st.columns(2)
+        # var_x = col1.selectbox("가로축(X)", df_sel.columns, key="viz_x")
+        # var_y = col2.selectbox("세로축(Y) — 단일 그래프는 X=Y로 설정", ["(같음)"] + list(df_sel.columns), key="viz_y")
+        # ① 컬럼 분류
+        cat_cols = [col for col in df_sel.columns if df_sel[col].dtype == 'object']
+        num_cols = [col for col in df_sel.columns if df_sel[col].dtype != 'object']
+
+        # ② 태그 붙인 옵션 생성
+        colnames_tagged = [f"[범주형] {col}" for col in cat_cols] + [f"[수치형] {col}" for col in num_cols]
+
+        # ③ selectbox 표시
         col1, col2 = st.columns(2)
-        var_x = col1.selectbox("가로축(X)", df_sel.columns, key="viz_x")
-        var_y = col2.selectbox("세로축(Y) — 단일 그래프는 X=Y로 설정", ["(같음)"] + list(df_sel.columns), key="viz_y")
+        label_x = col1.selectbox("가로축(X)", colnames_tagged, key="viz_x_label")
+        label_y = col2.selectbox("세로축(Y) — 단일 그래프는 X=Y로 설정", ["(같음)"] + colnames_tagged, key="viz_y_label")
+
+        # ④ 태그 제거 후 실제 변수 추출
+        def remove_tag(label):
+            return label.split("] ")[-1] if "] " in label else label
+
+        var_x = remove_tag(label_x)
+        var_y = var_x if label_y == "(같음)" else remove_tag(label_y)
+
+
         gtype = st.selectbox(
             "그래프 종류",
             ["막대그래프", "히스토그램", "도수분포다각형", "꺾은선그래프", "상자그림", "산점도"],
@@ -690,68 +707,68 @@ def data_analysis_tab() -> None:
 
 
 
-    # ④ 신뢰구간 추정 ------------------------------------------------------
-    with st.expander("③ 신뢰구간 추정 🔹", expanded=False):
-        num_cols = [c for c in df_sel.columns if pd.api.types.is_numeric_dtype(df_sel[c])]
-        cat_cols = [c for c in df_sel.columns if c not in num_cols]
-        num_var  = st.selectbox("📐 수치형 변수", num_cols, key="ci_num")
-        grp_var  = st.selectbox("🗂️ 그룹 변수 (없으면 ‘(단일)’) ", ["(단일)"] + cat_cols, key="ci_grp")
-        conf     = st.radio("신뢰수준 선택", (95, 99), horizontal=True, key="ci_conf")
-        alpha    = 1 - conf/100
-        if st.button("📏 신뢰구간 추정"):
+    # # ④ 신뢰구간 추정 ------------------------------------------------------
+    # with st.expander("③ 신뢰구간 추정 🔹", expanded=False):
+    #     num_cols = [c for c in df_sel.columns if pd.api.types.is_numeric_dtype(df_sel[c])]
+    #     cat_cols = [c for c in df_sel.columns if c not in num_cols]
+    #     num_var  = st.selectbox("📐 수치형 변수", num_cols, key="ci_num")
+    #     grp_var  = st.selectbox("🗂️ 그룹 변수 (없으면 ‘(단일)’) ", ["(단일)"] + cat_cols, key="ci_grp")
+    #     conf     = st.radio("신뢰수준 선택", (95, 99), horizontal=True, key="ci_conf")
+    #     alpha    = 1 - conf/100
+    #     if st.button("📏 신뢰구간 추정"):
 
-            # ― (단일) 전체 신뢰구간 ―
-            if grp_var == "(단일)":
-                s    = df_sel[num_var].dropna()
-                n    = len(s)
-                mean = s.mean()
-                se   = s.std(ddof=1)/np.sqrt(n)
-                h    = t.ppf(1-alpha/2, max(n-1,1)) * se
-                ci_df = pd.DataFrame({
-                    "label": ["전체"],
-                    "mean":  [mean],
-                    "lo":    [mean-h],
-                    "hi":    [mean+h]
-                })
+    #         # ― (단일) 전체 신뢰구간 ―
+    #         if grp_var == "(단일)":
+    #             s    = df_sel[num_var].dropna()
+    #             n    = len(s)
+    #             mean = s.mean()
+    #             se   = s.std(ddof=1)/np.sqrt(n)
+    #             h    = t.ppf(1-alpha/2, max(n-1,1)) * se
+    #             ci_df = pd.DataFrame({
+    #                 "label": ["전체"],
+    #                 "mean":  [mean],
+    #                 "lo":    [mean-h],
+    #                 "hi":    [mean+h]
+    #             })
 
-            # ― 그룹별 신뢰구간 ―
-            else:
-                stats = (
-                    df_sel
-                    .groupby(grp_var)[num_var]
-                    .agg(count="count", mean="mean", std="std")
-                    .reset_index()
-                    .rename(columns={grp_var: "label"})
-                )
-                stats["se"] = stats["std"] / np.sqrt(stats["count"])
-                df_t = t.ppf(1-alpha/2, np.maximum(stats["count"]-1, 1))
-                stats["lo"] = stats["mean"] - df_t * stats["se"]
-                stats["hi"] = stats["mean"] + df_t * stats["se"]
+    #         # ― 그룹별 신뢰구간 ―
+    #         else:
+    #             stats = (
+    #                 df_sel
+    #                 .groupby(grp_var)[num_var]
+    #                 .agg(count="count", mean="mean", std="std")
+    #                 .reset_index()
+    #                 .rename(columns={grp_var: "label"})
+    #             )
+    #             stats["se"] = stats["std"] / np.sqrt(stats["count"])
+    #             df_t = t.ppf(1-alpha/2, np.maximum(stats["count"]-1, 1))
+    #             stats["lo"] = stats["mean"] - df_t * stats["se"]
+    #             stats["hi"] = stats["mean"] + df_t * stats["se"]
 
-                ci_df = stats[["label", "mean", "lo", "hi"]]
+    #             ci_df = stats[["label", "mean", "lo", "hi"]]
 
-            # 2) 시각화
-            fig, ax = plt.subplots(figsize=(8, 0.6*len(ci_df)+1))
-            ax.errorbar(
-                x=ci_df["mean"],
-                y=ci_df["label"],
-                xerr=[ci_df["mean"]-ci_df["lo"], ci_df["hi"]-ci_df["mean"]],
-                fmt="o", capsize=6, elinewidth=2, markersize=5
-            )
-            ax.set_xlabel(f"{num_var}  (신뢰수준 {conf}%)")
-            ax.set_title("그룹별 평균과 신뢰구간")
-            ax.grid(axis="x", ls="--", alpha=0.4)
-            st.pyplot(fig, use_container_width=True)
+    #         # 2) 시각화
+    #         fig, ax = plt.subplots(figsize=(8, 0.6*len(ci_df)+1))
+    #         ax.errorbar(
+    #             x=ci_df["mean"],
+    #             y=ci_df["label"],
+    #             xerr=[ci_df["mean"]-ci_df["lo"], ci_df["hi"]-ci_df["mean"]],
+    #             fmt="o", capsize=6, elinewidth=2, markersize=5
+    #         )
+    #         ax.set_xlabel(f"{num_var}  (신뢰수준 {conf}%)")
+    #         ax.set_title("그룹별 평균과 신뢰구간")
+    #         ax.grid(axis="x", ls="--", alpha=0.4)
+    #         st.pyplot(fig, use_container_width=True)
 
-            # 3) LaTeX 부등호
-            st.markdown("#### 📑 신뢰구간 결과")
-            for _, row in ci_df.iterrows():
-                lbl, m, lo, hi = row["label"], row["mean"], row["lo"], row["hi"]
-                st.latex(
-                    rf"\text{{{lbl}}}: \; {lo:.2f} \;\le\; \mu \;\le\; {hi:.2f}"
-                )
-            # 4) 코드 저장
-            st.session_state.last_code = f"# CI for {num_var} by {grp_var}, {conf}%"
+    #         # 3) LaTeX 부등호
+    #         st.markdown("#### 📑 신뢰구간 결과")
+    #         for _, row in ci_df.iterrows():
+    #             lbl, m, lo, hi = row["label"], row["mean"], row["lo"], row["hi"]
+    #             st.latex(
+    #                 rf"\text{{{lbl}}}: \; {lo:.2f} \;\le\; \mu \;\le\; {hi:.2f}"
+    #             )
+    #         # 4) 코드 저장
+    #         st.session_state.last_code = f"# CI for {num_var} by {grp_var}, {conf}%"
 
     # ------------------------------------------------------------------ #
     # 🧑🏻‍🏫 AI 피드백
@@ -759,7 +776,7 @@ def data_analysis_tab() -> None:
     st.session_state.setdefault("da_fb_count", 0)
     st.session_state.setdefault("da_feedbacks", [])
 
-    interp = st.text_area("그래프를 해석해 보세요(2-3문장)", key="interp_da")
+    interp = st.text_area("①,②를 바탕으로 그래프를 해석해 보세요(2-3문장)", key="interp_da")
     st.session_state.interp = interp
     st.markdown(f"**🧠 피드백 요청: {st.session_state.da_fb_count} / 3회**")
 
@@ -785,13 +802,33 @@ def data_analysis_tab() -> None:
             fb = ask_gpt(fbp)
             st.session_state.da_fb_count += 1
             st.session_state.da_feedbacks.append(fb)
+            # st.session_state.ai_logs.append({
+            #     "stage": "3. Data&Analysis",
+            #     "input": interp.strip(),
+            #     "code": st.session_state.get("last_code", ""),
+            #     "ai_feedback": fb,
+            #     "ai_level": level
+            # })
+
+            # 그래프 및 해석 정보 수집
+            gtype = st.session_state.get("viz_gtype", "그래프 없음").lower()
+            vx    = st.session_state.get("viz_x", "(없음)")
+            vy    = st.session_state.get("viz_y", "(없음)")
+            if vy == "(같음)":
+                vy = vx  # 단변량일 경우 동일 처리
+
+            # input에 그래프 정보 + 해석 구조화 기록
+            log_input = f"그래프: {gtype} | X={vx}, Y={vy}\n해석: {interp.strip()}"
+
+            # 로그 저장
             st.session_state.ai_logs.append({
                 "stage": "3. Data&Analysis",
-                "input": interp.strip(),
-                "code": st.session_state.get("last_code", ""),
+                "input": log_input,
+                "code": "",  # 피겨 사이즈 제거 → 코드 설명 필요 없으면 생략
                 "ai_feedback": fb,
                 "ai_level": level
             })
+
             push_last_log()
 
     render_feedback_history(st.session_state.da_feedbacks)
@@ -813,10 +850,7 @@ def push_reflection(text: str) -> None:
         st.session_state.sid,
         text,
     ]
-    try:
-        connect_sheet("reflection").append_row(row, value_input_option="USER_ENTERED")
-    except Exception as e:
-        st.error(f"Sheets 전송 실패: {e}")
+    connect_sheet("reflection").append_row(row, value_input_option="USER_ENTERED")
 
 def conclusion_tab() -> None:
     # 항상 헤더와 안내는 표시
@@ -837,12 +871,58 @@ def conclusion_tab() -> None:
         }
     )
 
-    # 3단계 저장 여부 확인 후 안내 또는 입력창 제공
+    # # 3단계 저장 여부 확인 후 안내 또는 입력창 제공
+    # if not st.session_state.get("da_saved"):
+    #     st.warning("⚠️ 먼저 3단계에서 **저장하기 (Data & Analysis)** 버튼을 눌러야 전송할 수 있습니다.")
+    #     return
+
+    # # 통합 입력창
+    # combined_input = st.text_area(
+    #     "🔖 결론과 소감 (필수) — 아래 항목을 함께 포함해 작성하세요.\n"
+    #     "- 설정한 질문에 대한 결론\n"
+    #     "- 분석에 사용한 근거 및 과정\n"
+    #     "- 느낀 점, 어려웠던 점, 새롭게 알게 된 점 등",
+    #     key="combined_conclusion_reflection",
+    #     height=300,
+    # )
+
+    # # 전송 버튼
+    # if st.button("📤 결론·소감 전송", type="primary", use_container_width=True):
+    #     if not combined_input.strip():
+    #         st.warning("결론과 소감을 모두 포함해 작성해야 전송됩니다.")
+    #         st.stop()
+
+    #     # 저장: 결론 로그
+    #     st.session_state.ai_logs = [
+    #         lg for lg in st.session_state.ai_logs if lg.get("stage") != "4. Conclusion"
+    #     ]
+    #     st.session_state.ai_logs.append({
+    #         "stage": "4. Conclusion",
+    #         "input": combined_input.strip(),
+    #         "ai_feedback": "",
+    #         "ai_level": "",
+    #     })
+    #     push_last_log()
+
+    #     # 저장: 소감은 별도로 추출해서 저장
+    #     push_reflection(combined_input.strip())
+
+    #     # 완료 메시지
+    #     st.success("결론과 소감이 전송되었습니다! 🎉")
+    #     st.balloons()
+
+    #     # 입력 초기화
+    #     st.session_state.combined_conclusion_reflection = ""
+    # 결론 탭: 입력 전 세션 초기화
+    if "combined_conclusion_reflection" not in st.session_state:
+        st.session_state["combined_conclusion_reflection"] = ""
+
+    # 3단계 저장 여부 확인
     if not st.session_state.get("da_saved"):
         st.warning("⚠️ 먼저 3단계에서 **저장하기 (Data & Analysis)** 버튼을 눌러야 전송할 수 있습니다.")
-        return
+        st.stop()
 
-    # 통합 입력창
+    # 입력 위젯
     combined_input = st.text_area(
         "🔖 결론과 소감 (필수) — 아래 항목을 함께 포함해 작성하세요.\n"
         "- 설정한 질문에 대한 결론\n"
@@ -854,31 +934,31 @@ def conclusion_tab() -> None:
 
     # 전송 버튼
     if st.button("📤 결론·소감 전송", type="primary", use_container_width=True):
-        if not combined_input.strip():
+        content = st.session_state["combined_conclusion_reflection"].strip()
+
+        if not content:
             st.warning("결론과 소감을 모두 포함해 작성해야 전송됩니다.")
             st.stop()
 
-        # 저장: 결론 로그
+        # 결론 로그 저장
         st.session_state.ai_logs = [
             lg for lg in st.session_state.ai_logs if lg.get("stage") != "4. Conclusion"
         ]
         st.session_state.ai_logs.append({
             "stage": "4. Conclusion",
-            "input": combined_input.strip(),
+            "input": content,
             "ai_feedback": "",
             "ai_level": "",
         })
         push_last_log()
-
-        # 저장: 소감은 별도로 추출해서 저장
-        push_reflection(combined_input.strip())
+        # push_reflection(content)
 
         # 완료 메시지
         st.success("결론과 소감이 전송되었습니다! 🎉")
         st.balloons()
 
-        # 입력 초기화
-        st.session_state.combined_conclusion_reflection = ""
+        # 강제 초기화 없이 rerun만 수행
+        # st.experimental_rerun()
 
 
 # ===== 22. 탭 UI =====
